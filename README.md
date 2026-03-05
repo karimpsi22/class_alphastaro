@@ -111,7 +111,7 @@ The key parameters are:
 
 `N_star = value for the number of e-folds (N_*)`
 
-An example explanatory_alpha.ini file is included and notebook to use it through the python wrapper. 
+An example `explanatory_alpha.ini` file is included and a notebook `C_ells_vary_alpha.ipynb` to use it through the python wrapper. 
 
 Developing the code
 --------------------
