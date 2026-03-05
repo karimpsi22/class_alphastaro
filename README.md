@@ -95,7 +95,7 @@ Version with α-Starobinsky inflation
 
 Author: Francisco Linares Cedeño and Karim Carrion
 
-This version allows for running the code for the generalized α-Starobinsky inflationary model. It exactly solves the primordial background and perturbation dynamics numerically up to the end of inflation, circumventing standard slow-roll approximations. 
+This version allows for running the code for the generalized α-Starobinsky inflationary model.
 
 The key parameters are:
 
