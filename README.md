@@ -90,6 +90,21 @@ typing 'pyhton CPU.py -h'. There is a similar script for MATLAB,
 written by Thomas Tram. To use it, once in MATLAB, type 'help
 plot_CLASS_output.m'
 
+Version with α-Starobinsky inflation
+------------------------------------
+Author: Francisco Linares Cedeño and Karim Carrion
+
+This version allows for running the code for the generalized α-Starobinsky inflationary model. It exactly solves the primordial background and perturbation dynamics numerically up to the end of inflation, circumventing standard slow-roll approximations. 
+The key parameters are:
+Pk_ini_type = inflation_V_end
+full_potential = alphastaro
+inflation_behavior = numerical
+Vparam0 = value for the base potential scale (V_0)
+Vparam1 = value for the deformation parameter (\alpha)
+N_star = value for the number of e-folds (N_*)
+
+An example explanatory_alpha.ini file is included and notebook to use it through the python wrapper. 
+
 Developing the code
 --------------------
 
