@@ -93,7 +93,7 @@ plot_CLASS_output.m'
 Version with α-Starobinsky inflation
 ------------------------------------
 
-Author: Francisco Linares Cedeño and Karim Carrion
+Authors: Francisco Linares Cedeño and Karim Carrion
 
 This version allows for running the code for the generalized α-Starobinsky inflationary model.
 
