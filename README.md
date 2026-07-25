@@ -90,6 +90,45 @@ typing 'pyhton CPU.py -h'. There is a similar script for MATLAB,
 written by Thomas Tram. To use it, once in MATLAB, type 'help
 plot_CLASS_output.m'
 
+Version with α-Starobinsky inflation + Reheating feedback
+----------------------------------------------------------
+
+Authors: Francisco Linares Cedeño and Karim Carrion
+
+This version allows for running the code for the generalized α-Starobinsky inflationary model.
+
+The key parameters are:
+
+`Pk_ini_type = inflation_V_end`
+
+`full_potential = alphastaro`
+
+`inflation_behavior = numerical`
+
+`Vparam0 = value for the base potential scale (V_0)`
+
+`Vparam1 = value for the deformation parameter (\alpha)`
+
+`N_star = value for the number of e-folds (N_*)`
+
+An example `explanatory_alpha.ini` file is included and a notebook `C_ells_vary_alpha.ipynb` to use it through the python wrapper. 
+
+The implementation of Reheating feedback was done by Karim Carrion and Luis E. Padilla
+
+For Reheating feedback, new parameters are:
+
+`use_reheating = yes`
+
+`w_re = effective equation of state during reheating (must be > -1/3)`
+
+`T_reh = reheating temperature in GeV`
+
+`g_re = effective number of relativistic d.o.f. at reheating`
+
+`g_sre =  entropy d.o.f. at reheating (often equal to g_re)`
+
+Also an example `explanatory_reheating.ini` file is included.
+
 Developing the code
 --------------------
 
