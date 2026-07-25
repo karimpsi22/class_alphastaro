@@ -4472,6 +4472,135 @@ int input_read_parameters_primordial(struct file_content * pfc,
     class_read_double("Vparam3",ppm->V3);
     class_read_double("Vparam4",ppm->V4);
 
+    /* ================================================================
+     * NEW: Reheating feedback parameters
+     * ================================================================ */
+    
+    /** 1.e.4) Reheating feedback flag and parameters */
+    /* Read whether to use reheating feedback */
+    class_read_flag("use_reheating",ppm->use_reheating);
+    
+    /* If reheating feedback is enabled, read reheating parameters */
+    if (ppm->use_reheating == _TRUE_) {
+      
+      class_read_double("w_re",ppm->w_re);
+      class_read_double("T_reh",ppm->T_reh);
+      class_read_double("g_re",ppm->g_re);
+      class_read_double("g_sre",ppm->g_sre);
+      
+      /* Validate reheating parameters */
+      class_test(ppm->w_re <= -1.0/3.0,
+                 errmsg,
+                 "w_re = %g must be > -1/3 for reheating to eventually end. "
+                 "With w_re <= -1/3, the reheating phase would never complete.",
+                 ppm->w_re);
+      
+      class_test(ppm->T_reh <= 0.0,
+                 errmsg,
+                 "T_reh = %g GeV must be positive. "
+                 "Reheating temperature cannot be zero or negative.",
+                 ppm->T_reh);
+      
+      class_test(ppm->g_re <= 0.0,
+                 errmsg,
+                 "g_re = %g must be positive. "
+                 "The effective number of relativistic degrees of freedom "
+                 "at reheating cannot be zero or negative.",
+                 ppm->g_re);
+      
+      class_test(ppm->g_sre <= 0.0,
+                 errmsg,
+                 "g_sre = %g must be positive. "
+                 "The entropy degrees of freedom at reheating "
+                 "cannot be zero or negative.",
+                 ppm->g_sre);
+      
+      /* Optional: Warn about unusually high reheating temperature */
+      class_test(ppm->T_reh > 1.0e16,
+                 errmsg,
+                 "T_reh = %g GeV seems unreasonably high. "
+                 "Typical reheating temperatures are below 10^16 GeV (GUT scale). "
+                 "Please check your input.",
+                 ppm->T_reh);
+      
+      if (ppm->primordial_verbose > 0) {
+        printf("NOTE: Reheating feedback is enabled.\n");
+        printf("      The pivot scale will be determined self-consistently\n");
+        printf("      from reheating physics rather than using a fixed N_star.\n");
+        printf("      Parameters: w_re = %g, T_reh = %g GeV, g_re = %g, g_sre = %g\n",
+               ppm->w_re, ppm->T_reh, ppm->g_re, ppm->g_sre);
+      }
+      
+      /* Set pivot method to reheating (overrides N_star/ln_aH_ratio) */
+      ppm->phi_pivot_method = reheating_Nk;
+      
+    }
+    /* ================================================================
+     * END NEW: Reheating feedback parameters
+     * ================================================================ */
+    
+    /** 1.e.5) How much the scale factor a or the product (aH) increases between
+        Hubble crossing for the pivot scale (during inflation) and the
+        end of inflation */
+    /* Read */
+    class_call(parser_read_string(pfc,"ln_aH_ratio",&string1,&flag1,errmsg),
+               errmsg,
+               errmsg);
+    class_call(parser_read_string(pfc,"N_star",&string2,&flag2,errmsg),
+               errmsg,
+               errmsg);
+    
+    /* Only require N_star or ln_aH_ratio if NOT using reheating */
+    if (ppm->use_reheating == _FALSE_) {
+      /* Test */
+      class_test((flag1 == _TRUE_) && (flag2 == _TRUE_),
+                 errmsg,
+                 "You can only enter one of 'ln_aH_ratio' or 'N_star'.");
+      /* Complete set of parameters */
+      if (flag1 == _TRUE_) {
+        if ((strstr(string1,"auto") != NULL) || (strstr(string1,"AUTO") != NULL)){
+          ppm->phi_pivot_method = ln_aH_ratio_auto;
+        }
+        else {
+          ppm->phi_pivot_method = ln_aH_ratio;
+          class_read_double("ln_aH_ratio",ppm->phi_pivot_target);
+        }
+      }
+      if (flag2 == _TRUE_) {
+        ppm->phi_pivot_method = N_star;
+        class_read_double("N_star",ppm->phi_pivot_target);
+      }
+    }
+    else {
+      /* If reheating is enabled and user also specified N_star or ln_aH_ratio, warn them */
+      if ((flag1 == _TRUE_) || (flag2 == _TRUE_)) {
+        printf("WARNING: Reheating feedback is enabled (use_reheating = yes).\n");
+        printf("         The specified N_star or ln_aH_ratio will be IGNORED.\n");
+        printf("         The pivot scale will be determined from reheating physics.\n");
+      }
+    }
+
+    /** 1.e.6) Should the inflation module do its normal job of numerical
+        integration ('numerical') or use analytical slow-roll formulas
+        to infer the primordial spectrum from the potential
+        ('analytical')? */
+    /* Read */
+    class_call(parser_read_string(pfc,"inflation_behavior",&string1,&flag1,errmsg),
+               errmsg,
+               errmsg);
+    /* Complete set of parameters */
+    if (flag1 == _TRUE_) {
+      if (strstr(string1,"numerical") != NULL){
+        ppm->behavior = numerical;
+      }
+      else if (strstr(string1,"analytical") != NULL){
+        ppm->behavior = analytical;
+      }
+      else{
+        class_stop(errmsg,"You specified 'inflation_behavior' as '%s'. It has to be one of {'numerical','analytical'}.",string1);
+      }
+    }
+
     /** 1.e.4) How much the scale factor a or the product (aH) increases between
         Hubble crossing for the pivot scale (during inflation) and the
         end of inflation */
@@ -6087,6 +6216,15 @@ int input_default_params(struct background *pba,
   ppm->phi_end=0.;
   /** 1.e.2) Shape of the potential */
   ppm->potential=polynomial;
+
+  /* NEW: Reheating defaults */
+  /** 1.e.3) Reheating feedback */
+  ppm->use_reheating = _FALSE_;    /* Default: no reheating feedback */
+  ppm->w_re = 0.0;                 /* Default: matter-dominated reheating */
+  ppm->T_reh = 1.0e10;             /* Default: 10^10 GeV */
+  ppm->g_re = 106.75;              /* Default: Standard Model value */
+  ppm->g_sre = 106.75;             /* Default: equal to g_re */
+  
   /** 1.e.4) Increase of scale factor or (aH) between Hubble crossing at pivot
       scale and end of inflation */
   ppm->phi_pivot_method = N_star;

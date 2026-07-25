@@ -60,7 +60,8 @@ enum time_definition {
 enum phi_pivot_methods {
                         N_star,
                         ln_aH_ratio,
-                        ln_aH_ratio_auto
+                        ln_aH_ratio_auto,
+                        reheating_Nk
 };
 
 /** enum specifying how the inflation module computes the primordial spectrum (default: numerical) */
@@ -157,6 +158,15 @@ struct primordial {
   double c_nid_niv; /**< NIDxNIV cross-correlation at pivot scale, from -1 to 1 */
   double n_nid_niv; /**< NIDxNIV cross-correlation tilt */
   double alpha_nid_niv; /**< NIDxNIV cross-correlation running */
+
+
+  /* reheating parameters */
+  short use_reheating; /**< flag for reheating-based pivot determination */
+  double w_re;         /**< effective equation of state during reheating */
+  double T_reh;        /**< reheating temperature in GeV */
+  double g_re;         /**< relativistic degrees of freedom at reheating */
+  double g_sre;        /**< entropy degrees of freedom at reheating */
+
 
   /** parameters describing the case primordial_spec_type = inflation_V */
 
@@ -518,6 +528,13 @@ extern "C" {
                              struct primordial * ppm,
                              int number_of_titles,
                              double *data);
+
+  int primordial_inflation_Nk_from_reheating(
+                                              struct primordial * ppm,
+                                              double phi_k,
+                                              double phi_end,
+                                              double * N_k
+                                              );
 #ifdef __cplusplus
 }
 #endif

@@ -66,6 +66,7 @@ setup.py
 ./external/heating/injection.h
 ./external/heating/noninjection.c
 ./external/heating/noninjection.h
+./include/.DS_Store
 ./include/arrays.h
 ./include/background.h
 ./include/class.h
@@ -105,6 +106,7 @@ setup.py
 ./python/interface_generator.py
 ./python/setup.py
 ./python/test_class.py
+./source/.DS_Store
 ./source/background.c
 ./source/distortions.c
 ./source/fourier.c
@@ -191,6 +193,7 @@ external/heating/injection.c
 external/heating/injection.h
 external/heating/noninjection.c
 external/heating/noninjection.h
+include/.DS_Store
 include/arrays.h
 include/background.h
 include/class.h
@@ -230,6 +233,7 @@ python/extract_errors.py
 python/interface_generator.py
 python/setup.py
 python/test_class.py
+source/.DS_Store
 source/background.c
 source/distortions.c
 source/fourier.c
