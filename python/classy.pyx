@@ -3682,6 +3682,33 @@ cdef class Class:
                 value = self.pm.V3
             elif name == 'V_4':
                 value = self.pm.V4
+            # --- inflation / reheating sector (inflation_V_end) ---
+            elif name == 'phi_pivot':
+                value = self.pm.phi_pivot
+            elif name == 'phi_end':
+                value = self.pm.phi_end
+            elif name == 'phi_end_inflation':
+                value = self.pm.phi_end_inflation
+            elif name == 'H_end_inflation':
+                value = self.pm.H_end_inflation
+            elif name == 'rho_end_inflation':
+                value = self.pm.rho_end_inflation
+            elif name == 'H_pivot':
+                value = self.pm.H_pivot_reheating
+            elif name == 'N_star':
+                value = self.pm.N_star_reheating
+            elif name == 'N_re':
+                value = self.pm.N_re_reheating
+            elif name == 'T_max_reheating':
+                value = self.pm.T_max_reheating
+            elif name == 'w_re':
+                value = self.pm.w_re
+            elif name == 'T_reh':
+                value = self.pm.T_reh
+            elif name == 'g_re':
+                value = self.pm.g_re
+            elif name == 'g_sre':
+                value = self.pm.g_sre
             elif name == 'epsilon_V':
                 eps1 = self.pm.r*(1./16.-0.7296/16.*(self.pm.r/8.+self.pm.n_s-1.))
                 eps2 = -self.pm.n_s+1.-0.7296*self.pm.alpha_s-self.pm.r*(1./8.+1./8.*(self.pm.n_s-1.)*(-0.7296-1.5))-(self.pm.r/8.)**2*(-0.7296-1.)

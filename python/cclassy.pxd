@@ -303,6 +303,19 @@ cdef extern from "class.h":
         double V2
         double V3
         double V4
+        double phi_pivot
+        double phi_end
+        double phi_end_inflation
+        double H_end_inflation
+        double rho_end_inflation
+        double H_pivot_reheating
+        double N_star_reheating
+        double N_re_reheating
+        double T_max_reheating
+        double w_re
+        double T_reh
+        double g_re
+        double g_sre
         double f_cdi
         double n_cdi
         double c_ad_cdi

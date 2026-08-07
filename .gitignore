@@ -1,0 +1,27 @@
+# Build artefacts
+build/
+*.o
+*.opp
+*.a
+*.so
+/class
+python/classy.cpp
+python/build/
+classy.egg-info/
+*.egg-info/
+.eggs/
+
+# CLASS run output
+output/*
+!output/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Notebook figures
+figs/
+
+# OS
+.DS_Store

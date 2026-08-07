@@ -167,6 +167,25 @@ struct primordial {
   double g_re;         /**< relativistic degrees of freedom at reheating */
   double g_sre;        /**< entropy degrees of freedom at reheating */
 
+  /* physically allowed ranges for the reheating parameters */
+  short reheating_bounds; /**< _TRUE_: out-of-range (w_re,T_re) raises a recoverable
+                               error (samplers reject the point); _FALSE_: only warn */
+  double w_re_min;     /**< lower bound on w_re. Below -1/3 reheating never ends and
+                            the relation is singular at exactly -1/3 */
+  double w_re_max;     /**< upper bound on w_re. Above 1 the sound speed exceeds c */
+  double T_re_min;     /**< lower bound on T_reh in GeV (BBN, ~4 MeV) */
+
+  /* reheating outputs (derived; filled by primordial_inflation_find_phi_pivot) */
+  double phi_end_inflation; /**< field value where ddot(a)=0, i.e. the ACTUAL end of
+                                 inflation. Do NOT confuse with ppm->phi_end, which is
+                                 only a user-supplied bracketing value. */
+  double H_end_inflation;   /**< Hubble rate (CLASS units, m_Pl=1) at ddot(a)=0 */
+  double rho_end_inflation; /**< energy density (CLASS units) at ddot(a)=0 */
+  double H_pivot_reheating; /**< Hubble rate (CLASS units) at pivot crossing */
+  double N_star_reheating;  /**< N_k = ln(a_end/a_pivot) satisfying the reheating condition */
+  double N_re_reheating;    /**< number of e-folds during reheating */
+  double T_max_reheating;   /**< maximum reheating temperature in GeV (instantaneous reheating) */
+
 
   /** parameters describing the case primordial_spec_type = inflation_V */
 
@@ -505,6 +524,31 @@ extern "C" {
                                           double * y,
                                           double * dy
                                           );
+
+  int primordial_inflation_Nk_from_reheating(
+                                             struct primordial * ppm,
+                                             double H_k,
+                                             double rho_end,
+                                             double * N_k
+                                             );
+
+  int primordial_inflation_T_max(
+                                 struct primordial * ppm,
+                                 double H_k,
+                                 double rho_end,
+                                 double * T_max
+                                 );
+
+  int primordial_inflation_reheating_residual(
+                                              struct primordial * ppm,
+                                              struct precision * ppr,
+                                              double * y,
+                                              double * dy,
+                                              double phi,
+                                              double * N_actual,
+                                              double * N_target,
+                                              double * residual
+                                              );
 
   int primordial_inflation_derivs(
                                   double tau,

@@ -4487,42 +4487,23 @@ int input_read_parameters_primordial(struct file_content * pfc,
       class_read_double("T_reh",ppm->T_reh);
       class_read_double("g_re",ppm->g_re);
       class_read_double("g_sre",ppm->g_sre);
-      
-      /* Validate reheating parameters */
-      class_test(ppm->w_re <= -1.0/3.0,
-                 errmsg,
-                 "w_re = %g must be > -1/3 for reheating to eventually end. "
-                 "With w_re <= -1/3, the reheating phase would never complete.",
-                 ppm->w_re);
-      
-      class_test(ppm->T_reh <= 0.0,
-                 errmsg,
-                 "T_reh = %g GeV must be positive. "
-                 "Reheating temperature cannot be zero or negative.",
-                 ppm->T_reh);
-      
-      class_test(ppm->g_re <= 0.0,
-                 errmsg,
-                 "g_re = %g must be positive. "
-                 "The effective number of relativistic degrees of freedom "
-                 "at reheating cannot be zero or negative.",
-                 ppm->g_re);
-      
-      class_test(ppm->g_sre <= 0.0,
-                 errmsg,
-                 "g_sre = %g must be positive. "
-                 "The entropy degrees of freedom at reheating "
-                 "cannot be zero or negative.",
-                 ppm->g_sre);
-      
-      /* Optional: Warn about unusually high reheating temperature */
-      class_test(ppm->T_reh > 1.0e16,
-                 errmsg,
-                 "T_reh = %g GeV seems unreasonably high. "
-                 "Typical reheating temperatures are below 10^16 GeV (GUT scale). "
-                 "Please check your input.",
-                 ppm->T_reh);
-      
+
+      /* Physically allowed ranges. Defaults: -1/3 < w_re <= 1 and T_reh >= 4 MeV
+         (BBN). The upper bound on T_reh is T_max (eq. 37), computed on the fly.
+         With reheating_bounds = yes (default) a point outside the range makes
+         primordial_init fail, which a sampler treats as a rejected point. */
+      class_read_flag("reheating_bounds",ppm->reheating_bounds);
+      class_read_double("reheating_w_re_min",ppm->w_re_min);
+      class_read_double("reheating_w_re_max",ppm->w_re_max);
+      class_read_double("reheating_T_re_min",ppm->T_re_min);
+
+      /* NOTE: physical-range validation of (w_re, T_reh, g_re, g_sre) is performed
+         in primordial_inflation_Nk_from_reheating, NOT here. Reason: classy maps a
+         failure of input_init to CosmoSevereError, which aborts the whole run,
+         whereas a failure of primordial_init maps to CosmoComputationError, which
+         samplers treat as a rejected point. Only genuinely malformed input belongs
+         in input.c. */
+
       if (ppm->primordial_verbose > 0) {
         printf("NOTE: Reheating feedback is enabled.\n");
         printf("      The pivot scale will be determined self-consistently\n");
@@ -6224,6 +6205,17 @@ int input_default_params(struct background *pba,
   ppm->T_reh = 1.0e10;             /* Default: 10^10 GeV */
   ppm->g_re = 106.75;              /* Default: Standard Model value */
   ppm->g_sre = 106.75;             /* Default: equal to g_re */
+  ppm->reheating_bounds = _TRUE_;  /* Enforce the physical ranges by default */
+  ppm->w_re_min = -1./3. + 1.e-3;  /* below -1/3 reheating never ends */
+  ppm->w_re_max = 1.0;             /* above 1 the sound speed exceeds c */
+  ppm->T_re_min = 4.e-3;           /* BBN, in GeV */
+  ppm->phi_end_inflation = 0.;     /* Derived outputs, filled by find_phi_pivot */
+  ppm->H_end_inflation = 0.;
+  ppm->rho_end_inflation = 0.;
+  ppm->H_pivot_reheating = 0.;
+  ppm->N_star_reheating = 0.;
+  ppm->N_re_reheating = 0.;
+  ppm->T_max_reheating = 0.;
   
   /** 1.e.4) Increase of scale factor or (aH) between Hubble crossing at pivot
       scale and end of inflation */
