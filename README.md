@@ -90,7 +90,8 @@ typing 'pyhton CPU.py -h'. There is a similar script for MATLAB,
 written by Thomas Tram. To use it, once in MATLAB, type 'help
 plot_CLASS_output.m'
 
-# Version with α-Starobinsky inflation + Reheating feedback
+Version with α-Starobinsky inflation + Reheating feedback
+---------------------------------------------------------
 
 Authors: Francisco Linares Cedeño and Karim Carrion
 
@@ -108,7 +109,10 @@ The key parameters are:
 
 An example `explanatory_alpha.ini` file is included, and a notebook `C_ells_vary_alpha.ipynb` to use it through the python wrapper.
 
-## Reheating feedback
+If you use this module in your project, please cite the [associated paper](https://arxiv.org/abs/2603.25721).
+
+Reheating feedback
+------------------
 
 The implementation of Reheating feedback was done by Karim Carrion and Luis E. Padilla.
 
@@ -123,6 +127,8 @@ With `use_reheating = yes` the pivot scale is no longer set by `N_star`: it is s
 Points outside these ranges give a computation error (so a sampler rejects them) unless `reheating_bounds = no`. Besides the usual outputs, `get_current_derived_parameters` returns `phi_pivot`, `phi_end_inflation`, `N_star`, `N_re` and `T_max_reheating`. `primordial_inflation_tol_curvature = 1e-5` is recommended if `alpha_s` is used.
 
 An example `explanatory_reheating.ini` file is included.
+
+If this reheating module contributes to your research or analysis, kindly cite [this publication](https://arxiv.org/abs/XXXX-XXXX).
 
 Developing the code
 --------------------
