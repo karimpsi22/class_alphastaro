@@ -90,8 +90,7 @@ typing 'pyhton CPU.py -h'. There is a similar script for MATLAB,
 written by Thomas Tram. To use it, once in MATLAB, type 'help
 plot_CLASS_output.m'
 
-Version with α-Starobinsky inflation + Reheating feedback
-----------------------------------------------------------
+# Version with α-Starobinsky inflation + Reheating feedback
 
 Authors: Francisco Linares Cedeño and Karim Carrion
 
@@ -99,35 +98,31 @@ This version allows for running the code for the generalized α-Starobinsky infl
 
 The key parameters are:
 
-`Pk_ini_type = inflation_V_end`
+    Pk_ini_type = inflation_V_end
+    full_potential = alphastaro
+    inflation_behavior = numerical
+    Vparam0 = value for the base potential scale (V_0)
+    Vparam1 = value for the deformation parameter (α)
+    phi_end = field value where inflation has already ended (epsilon > 1 there)
+    N_star = number of e-folds (N_*)
 
-`full_potential = alphastaro`
+An example `explanatory_alpha.ini` file is included, and a notebook `C_ells_vary_alpha.ipynb` to use it through the python wrapper.
 
-`inflation_behavior = numerical`
+## Reheating feedback
 
-`Vparam0 = value for the base potential scale (V_0)`
+The implementation of Reheating feedback was done by Karim Carrion and Luis E. Padilla.
 
-`Vparam1 = value for the deformation parameter (\alpha)`
+With `use_reheating = yes` the pivot scale is no longer set by `N_star`: it is solved for, so that the number of e-folds between horizon crossing and the end of inflation matches the reheating history. `N_star` (or `ln_aH_ratio`) must then not be given, and A_s, n_s, r become outputs. The new parameters are:
 
-`N_star = value for the number of e-folds (N_*)`
+    use_reheating = yes
+    w_re = effective equation of state during reheating (-1/3 < w_re <= 1; default 0)
+    T_reh = reheating temperature in GeV (4 MeV <= T_reh <= T_max; default 1e10)
+    g_re = effective number of relativistic d.o.f. at reheating (default 106.75)
+    g_sre = entropy d.o.f. at reheating (default 106.75)
 
-An example `explanatory_alpha.ini` file is included and a notebook `C_ells_vary_alpha.ipynb` to use it through the python wrapper. 
+Points outside these ranges give a computation error (so a sampler rejects them) unless `reheating_bounds = no`. Besides the usual outputs, `get_current_derived_parameters` returns `phi_pivot`, `phi_end_inflation`, `N_star`, `N_re` and `T_max_reheating`. `primordial_inflation_tol_curvature = 1e-5` is recommended if `alpha_s` is used.
 
-The implementation of Reheating feedback was done by Karim Carrion and Luis E. Padilla
-
-For Reheating feedback, new parameters are:
-
-`use_reheating = yes`
-
-`w_re = effective equation of state during reheating (must be > -1/3)`
-
-`T_reh = reheating temperature in GeV`
-
-`g_re = effective number of relativistic d.o.f. at reheating`
-
-`g_sre =  entropy d.o.f. at reheating (often equal to g_re)`
-
-Also an example `explanatory_reheating.ini` file is included.
+An example `explanatory_reheating.ini` file is included.
 
 Developing the code
 --------------------
