@@ -3682,19 +3682,12 @@ cdef class Class:
                 value = self.pm.V3
             elif name == 'V_4':
                 value = self.pm.V4
-            # --- inflation / reheating sector (inflation_V_end) ---
             elif name == 'phi_pivot':
                 value = self.pm.phi_pivot
             elif name == 'phi_end':
                 value = self.pm.phi_end
             elif name == 'phi_end_inflation':
                 value = self.pm.phi_end_inflation
-            elif name == 'H_end_inflation':
-                value = self.pm.H_end_inflation
-            elif name == 'rho_end_inflation':
-                value = self.pm.rho_end_inflation
-            elif name == 'H_pivot':
-                value = self.pm.H_pivot_reheating
             elif name == 'N_star':
                 value = self.pm.N_star_reheating
             elif name == 'N_re':

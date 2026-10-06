@@ -4472,114 +4472,29 @@ int input_read_parameters_primordial(struct file_content * pfc,
     class_read_double("Vparam3",ppm->V3);
     class_read_double("Vparam4",ppm->V4);
 
-    /* ================================================================
-     * NEW: Reheating feedback parameters
-     * ================================================================ */
-    
-    /** 1.e.4) Reheating feedback flag and parameters */
-    /* Read whether to use reheating feedback */
+    /** 1.e.4) Reheating. If use_reheating = yes, phi_pivot is solved from the reheating
+        history (w_re, T_reh, g_re, g_sre) instead of being set by N_star or ln_aH_ratio.
+        The range checks on these parameters are done in primordial.c, where a failure
+        is a recoverable computation error (a sampler rejects the point). */
     class_read_flag("use_reheating",ppm->use_reheating);
-    
-    /* If reheating feedback is enabled, read reheating parameters */
     if (ppm->use_reheating == _TRUE_) {
-      
       class_read_double("w_re",ppm->w_re);
       class_read_double("T_reh",ppm->T_reh);
       class_read_double("g_re",ppm->g_re);
       class_read_double("g_sre",ppm->g_sre);
-
-      /* Physically allowed ranges. Defaults: -1/3 < w_re <= 1 and T_reh >= 4 MeV
-         (BBN). The upper bound on T_reh is T_max (eq. 37), computed on the fly.
-         With reheating_bounds = yes (default) a point outside the range makes
-         primordial_init fail, which a sampler treats as a rejected point. */
       class_read_flag("reheating_bounds",ppm->reheating_bounds);
       class_read_double("reheating_w_re_min",ppm->w_re_min);
       class_read_double("reheating_w_re_max",ppm->w_re_max);
       class_read_double("reheating_T_re_min",ppm->T_re_min);
-
-      /* NOTE: physical-range validation of (w_re, T_reh, g_re, g_sre) is performed
-         in primordial_inflation_Nk_from_reheating, NOT here. Reason: classy maps a
-         failure of input_init to CosmoSevereError, which aborts the whole run,
-         whereas a failure of primordial_init maps to CosmoComputationError, which
-         samplers treat as a rejected point. Only genuinely malformed input belongs
-         in input.c. */
-
-      if (ppm->primordial_verbose > 0) {
-        printf("NOTE: Reheating feedback is enabled.\n");
-        printf("      The pivot scale will be determined self-consistently\n");
-        printf("      from reheating physics rather than using a fixed N_star.\n");
-        printf("      Parameters: w_re = %g, T_reh = %g GeV, g_re = %g, g_sre = %g\n",
-               ppm->w_re, ppm->T_reh, ppm->g_re, ppm->g_sre);
-      }
-      
-      /* Set pivot method to reheating (overrides N_star/ln_aH_ratio) */
-      ppm->phi_pivot_method = reheating_Nk;
-      
-    }
-    /* ================================================================
-     * END NEW: Reheating feedback parameters
-     * ================================================================ */
-    
-    /** 1.e.5) How much the scale factor a or the product (aH) increases between
-        Hubble crossing for the pivot scale (during inflation) and the
-        end of inflation */
-    /* Read */
-    class_call(parser_read_string(pfc,"ln_aH_ratio",&string1,&flag1,errmsg),
-               errmsg,
-               errmsg);
-    class_call(parser_read_string(pfc,"N_star",&string2,&flag2,errmsg),
-               errmsg,
-               errmsg);
-    
-    /* Only require N_star or ln_aH_ratio if NOT using reheating */
-    if (ppm->use_reheating == _FALSE_) {
-      /* Test */
-      class_test((flag1 == _TRUE_) && (flag2 == _TRUE_),
+      class_call(parser_read_string(pfc,"N_star",&string1,&flag1,errmsg),
                  errmsg,
-                 "You can only enter one of 'ln_aH_ratio' or 'N_star'.");
-      /* Complete set of parameters */
-      if (flag1 == _TRUE_) {
-        if ((strstr(string1,"auto") != NULL) || (strstr(string1,"AUTO") != NULL)){
-          ppm->phi_pivot_method = ln_aH_ratio_auto;
-        }
-        else {
-          ppm->phi_pivot_method = ln_aH_ratio;
-          class_read_double("ln_aH_ratio",ppm->phi_pivot_target);
-        }
-      }
-      if (flag2 == _TRUE_) {
-        ppm->phi_pivot_method = N_star;
-        class_read_double("N_star",ppm->phi_pivot_target);
-      }
-    }
-    else {
-      /* If reheating is enabled and user also specified N_star or ln_aH_ratio, warn them */
-      if ((flag1 == _TRUE_) || (flag2 == _TRUE_)) {
-        printf("WARNING: Reheating feedback is enabled (use_reheating = yes).\n");
-        printf("         The specified N_star or ln_aH_ratio will be IGNORED.\n");
-        printf("         The pivot scale will be determined from reheating physics.\n");
-      }
-    }
-
-    /** 1.e.6) Should the inflation module do its normal job of numerical
-        integration ('numerical') or use analytical slow-roll formulas
-        to infer the primordial spectrum from the potential
-        ('analytical')? */
-    /* Read */
-    class_call(parser_read_string(pfc,"inflation_behavior",&string1,&flag1,errmsg),
-               errmsg,
-               errmsg);
-    /* Complete set of parameters */
-    if (flag1 == _TRUE_) {
-      if (strstr(string1,"numerical") != NULL){
-        ppm->behavior = numerical;
-      }
-      else if (strstr(string1,"analytical") != NULL){
-        ppm->behavior = analytical;
-      }
-      else{
-        class_stop(errmsg,"You specified 'inflation_behavior' as '%s'. It has to be one of {'numerical','analytical'}.",string1);
-      }
+                 errmsg);
+      class_call(parser_read_string(pfc,"ln_aH_ratio",&string2,&flag2,errmsg),
+                 errmsg,
+                 errmsg);
+      class_test((flag1 == _TRUE_) || (flag2 == _TRUE_),
+                 errmsg,
+                 "'N_star' and 'ln_aH_ratio' cannot be combined with 'use_reheating = yes', the pivot is then fixed by the reheating history.");
     }
 
     /** 1.e.4) How much the scale factor a or the product (aH) increases between
@@ -6197,26 +6112,20 @@ int input_default_params(struct background *pba,
   ppm->phi_end=0.;
   /** 1.e.2) Shape of the potential */
   ppm->potential=polynomial;
-
-  /* NEW: Reheating defaults */
-  /** 1.e.3) Reheating feedback */
-  ppm->use_reheating = _FALSE_;    /* Default: no reheating feedback */
-  ppm->w_re = 0.0;                 /* Default: matter-dominated reheating */
-  ppm->T_reh = 1.0e10;             /* Default: 10^10 GeV */
-  ppm->g_re = 106.75;              /* Default: Standard Model value */
-  ppm->g_sre = 106.75;             /* Default: equal to g_re */
-  ppm->reheating_bounds = _TRUE_;  /* Enforce the physical ranges by default */
-  ppm->w_re_min = -1./3. + 1.e-3;  /* below -1/3 reheating never ends */
-  ppm->w_re_max = 1.0;             /* above 1 the sound speed exceeds c */
-  ppm->T_re_min = 4.e-3;           /* BBN, in GeV */
-  ppm->phi_end_inflation = 0.;     /* Derived outputs, filled by find_phi_pivot */
-  ppm->H_end_inflation = 0.;
-  ppm->rho_end_inflation = 0.;
-  ppm->H_pivot_reheating = 0.;
+  /** 1.e.3) Reheating */
+  ppm->use_reheating = _FALSE_;
+  ppm->w_re = 0.;
+  ppm->T_reh = 1.e10;
+  ppm->g_re = 106.75;
+  ppm->g_sre = 106.75;
+  ppm->reheating_bounds = _TRUE_;
+  ppm->w_re_min = -1./3.+1.e-3;
+  ppm->w_re_max = 1.;
+  ppm->T_re_min = 4.e-3;
+  ppm->phi_end_inflation = 0.;
   ppm->N_star_reheating = 0.;
   ppm->N_re_reheating = 0.;
   ppm->T_max_reheating = 0.;
-  
   /** 1.e.4) Increase of scale factor or (aH) between Hubble crossing at pivot
       scale and end of inflation */
   ppm->phi_pivot_method = N_star;

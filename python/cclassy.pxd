@@ -306,9 +306,6 @@ cdef extern from "class.h":
         double phi_pivot
         double phi_end
         double phi_end_inflation
-        double H_end_inflation
-        double rho_end_inflation
-        double H_pivot_reheating
         double N_star_reheating
         double N_re_reheating
         double T_max_reheating

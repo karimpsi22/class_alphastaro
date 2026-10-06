@@ -60,8 +60,7 @@ enum time_definition {
 enum phi_pivot_methods {
                         N_star,
                         ln_aH_ratio,
-                        ln_aH_ratio_auto,
-                        reheating_Nk
+                        ln_aH_ratio_auto
 };
 
 /** enum specifying how the inflation module computes the primordial spectrum (default: numerical) */
@@ -159,33 +158,23 @@ struct primordial {
   double n_nid_niv; /**< NIDxNIV cross-correlation tilt */
   double alpha_nid_niv; /**< NIDxNIV cross-correlation running */
 
+  /** reheating (use_reheating = yes: phi_pivot is solved from the reheating history instead of N_star or ln_aH_ratio) */
 
-  /* reheating parameters */
-  short use_reheating; /**< flag for reheating-based pivot determination */
-  double w_re;         /**< effective equation of state during reheating */
-  double T_reh;        /**< reheating temperature in GeV */
-  double g_re;         /**< relativistic degrees of freedom at reheating */
-  double g_sre;        /**< entropy degrees of freedom at reheating */
+  short use_reheating;    /**< flag for the reheating-based pivot determination */
+  double w_re;            /**< effective equation of state during reheating */
+  double T_reh;           /**< reheating temperature in GeV */
+  double g_re;            /**< relativistic degrees of freedom at reheating */
+  double g_sre;           /**< entropy degrees of freedom at reheating */
 
-  /* physically allowed ranges for the reheating parameters */
-  short reheating_bounds; /**< _TRUE_: out-of-range (w_re,T_re) raises a recoverable
-                               error (samplers reject the point); _FALSE_: only warn */
-  double w_re_min;     /**< lower bound on w_re. Below -1/3 reheating never ends and
-                            the relation is singular at exactly -1/3 */
-  double w_re_max;     /**< upper bound on w_re. Above 1 the sound speed exceeds c */
-  double T_re_min;     /**< lower bound on T_reh in GeV (BBN, ~4 MeV) */
+  short reheating_bounds; /**< _TRUE_: (w_re,T_reh) outside the physical range is a recoverable error (a sampler rejects the point), _FALSE_: allowed */
+  double w_re_min;        /**< lower bound on w_re (-1/3 is singular and below it reheating never ends) */
+  double w_re_max;        /**< upper bound on w_re (above 1 the sound speed exceeds c) */
+  double T_re_min;        /**< lower bound on T_reh in GeV (BBN) */
 
-  /* reheating outputs (derived; filled by primordial_inflation_find_phi_pivot) */
-  double phi_end_inflation; /**< field value where ddot(a)=0, i.e. the ACTUAL end of
-                                 inflation. Do NOT confuse with ppm->phi_end, which is
-                                 only a user-supplied bracketing value. */
-  double H_end_inflation;   /**< Hubble rate (CLASS units, m_Pl=1) at ddot(a)=0 */
-  double rho_end_inflation; /**< energy density (CLASS units) at ddot(a)=0 */
-  double H_pivot_reheating; /**< Hubble rate (CLASS units) at pivot crossing */
-  double N_star_reheating;  /**< N_k = ln(a_end/a_pivot) satisfying the reheating condition */
-  double N_re_reheating;    /**< number of e-folds during reheating */
-  double T_max_reheating;   /**< maximum reheating temperature in GeV (instantaneous reheating) */
-
+  double phi_end_inflation; /**< output: field value at ddot(a)=0 (ppm->phi_end is only a bracketing value) */
+  double N_star_reheating;  /**< output: e-folds between pivot crossing and the end of inflation (also set when N_star is an input) */
+  double N_re_reheating;    /**< output: e-folds of the reheating stage */
+  double T_max_reheating;   /**< output: temperature of instantaneous reheating in GeV, largest allowed T_reh */
 
   /** parameters describing the case primordial_spec_type = inflation_V */
 
@@ -532,23 +521,23 @@ extern "C" {
                                              double * N_k
                                              );
 
-  int primordial_inflation_T_max(
-                                 struct primordial * ppm,
-                                 double H_k,
-                                 double rho_end,
-                                 double * T_max
-                                 );
-
   int primordial_inflation_reheating_residual(
                                               struct primordial * ppm,
                                               struct precision * ppr,
                                               double * y,
                                               double * dy,
                                               double phi,
-                                              double * N_actual,
-                                              double * N_target,
                                               double * residual
                                               );
+
+  int primordial_inflation_find_phi_pivot_reheating(
+                                                    struct primordial * ppm,
+                                                    struct precision * ppr,
+                                                    double * y,
+                                                    double * dy,
+                                                    double phi_small_epsilon,
+                                                    double a_ratio_after_small_epsilon
+                                                    );
 
   int primordial_inflation_derivs(
                                   double tau,
@@ -572,13 +561,6 @@ extern "C" {
                              struct primordial * ppm,
                              int number_of_titles,
                              double *data);
-
-  int primordial_inflation_Nk_from_reheating(
-                                              struct primordial * ppm,
-                                              double phi_k,
-                                              double phi_end,
-                                              double * N_k
-                                              );
 #ifdef __cplusplus
 }
 #endif

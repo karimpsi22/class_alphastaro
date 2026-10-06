@@ -15,6 +15,9 @@
  */
 
 #include "primordial.h"
+
+/* reduced Planck mass in GeV, used by the reheating relations */
+#define _REHEATING_M_PL_GEV_ 2.435e18
 #include "parallel.h"
 
 /**
@@ -961,177 +964,89 @@ int primordial_analytic_spectrum(
 
 
 /**
- * Number of e-folds N_k = ln(a_end/a_pivot) demanded by the reheating history.
+ * Number of e-folds N_k between the Hubble crossing of k_pivot and the end of
+ * inflation that a reheating history (w_re, T_reh, g_re, g_sre) requires.
  *
- * Combining
+ * With a_0 = 1 one has ln(a_0/a_k) = N_k + N_re + ln(a_0/a_re), where entropy
+ * conservation gives a_re = (43/(11 g_sre))^(1/3) T_0/T_reh, and
+ * N_re = ln(rho_end/rho_re)/(3(1+w_re)) with rho_re = (pi^2/30) g_re T_reh^4. Hence
  *
- *   ln(a_0/a_k) = N_k + N_re + ln(a_0/a_re),   a_0 = 1
- *   a_re/a_0    = (43/(11 g_s,re))^(1/3) T_0/T_re     (entropy conservation)
- *   N_re        = ln(rho_end/rho_re) / (3(1+w_re))
- *   rho_re      = (pi^2/30) g_re T_re^4
+ *   N_k = ln(H_k/k_pivot) + ln(43/(11 g_sre))/3 + ln(T_0/T_reh) - N_re.
  *
- * gives
+ * H_k and rho_end come from the numerical background, so no slow-roll
+ * approximation and no particular potential is assumed. They are given in CLASS
+ * units (m_Pl = 1) and converted to reduced-Planck units (H -> H sqrt(8 pi),
+ * rho -> rho (8 pi)^2). N_re is stored in ppm->N_re_reheating.
  *
- *   N_k = ln(H_k/k_pivot) + (1/3) ln(43/(11 g_s,re)) + ln(T_0/T_re)
- *         - ln(rho_end/rho_re) / (3(1+w_re))
- *
- * Same equation as eq.(29) of the note, only without using the slow-roll
- * relations H_k = 2 pi sqrt(A_s) f'/f and V_0 = 12 pi^2 A_s f'^2/f^3 to trade
- * V_0 for A_s. Keeping V_0 matters here: in inflation_V_end mode ppm->A_s is an
- * output (overwritten by primordial_init) and is never read from the .ini, so
- * feeding it back into eq.(29) would silently use the default 2.100549e-9.
- * It also lets H_k and rho_end come straight from the numerical background,
- * and drops the assumption V = V0*f(phi), which only held for 'alphastaro'.
- *
- * H_k and rho_end come in CLASS units (m_Pl = 1, so 8 pi G = 8 pi) and are
- * converted here to reduced-Planck ones: H *= sqrt(8 pi), rho *= (8 pi)^2.
- *
- * @param ppm     Input: pointer to primordial structure
+ * @param ppm     Input/output: pointer to primordial structure
  * @param H_k     Input: Hubble rate at pivot crossing, CLASS units
- * @param rho_end Input: energy density at the end of inflation (ddot a = 0), CLASS units
+ * @param rho_end Input: energy density at the end of inflation (ddot(a)=0), CLASS units
  * @param N_k     Output: number of e-folds between pivot crossing and end of inflation
  * @return the error status
  */
 int primordial_inflation_Nk_from_reheating(
-    struct primordial *ppm,
-    double H_k,
-    double rho_end,
-    double *N_k)
-{
-    /* physical constants, reduced Planck mass convention */
-    const double M_Pl_GeV      = 2.435e18;
-    const double K_B_GeV_per_K = 8.617333262145e-14;
-    const double T0_K          = 2.7255;
-    const double Mpc_m         = 3.0856775814913673e22;
-    const double hbarc_GeV_m   = 1.973269804e-16;
+                                           struct primordial * ppm,
+                                           double H_k,
+                                           double rho_end,
+                                           double * N_k
+                                           ) {
 
-    double T_reh_planck, T0_planck, k_pivot_planck;
-    double H_k_red, rho_end_red, rho_re_red;
-    double N_expansion, N_entropy, N_temperature, N_re;
+  const double M_Pl_GeV      = _REHEATING_M_PL_GEV_;
+  const double K_B_GeV_per_K = 8.617333262145e-14;
+  const double T0_K          = 2.7255;
+  const double Mpc_m         = 3.0856775814913673e22;
+  const double hbarc_GeV_m   = 1.973269804e-16;
 
-    /* Kept here rather than in input.c: classy maps a primordial_init failure to
-       CosmoComputationError, which samplers treat as a rejected point, while an
-       input_init failure raises CosmoSevereError and kills the run. */
-    class_test(ppm->T_reh <= 0.0, ppm->error_message,
-               "T_reh must be positive, got T_reh=%e GeV", ppm->T_reh);
-    class_test(ppm->k_pivot <= 0.0, ppm->error_message,
-               "k_pivot must be positive, got k_pivot=%e 1/Mpc", ppm->k_pivot);
-    class_test((ppm->g_re <= 0.0) || (ppm->g_sre <= 0.0), ppm->error_message,
-               "g_re and g_sre must be positive, got g_re=%e g_sre=%e",
-               ppm->g_re, ppm->g_sre);
-    class_test(1.0 + ppm->w_re <= 0.0, ppm->error_message,
-               "w_re must satisfy 1+w_re>0, got w_re=%e", ppm->w_re);
+  double T_reh, T0, k_pivot, rho_re, N_re;
 
-    /* Allowed ranges: w_re <= -1/3 never ends reheating (and the relation is
-       singular right at -1/3), w_re > 1 needs a superluminal sound speed, and
-       T_re below ~4 MeV would reheat after BBN. */
-    if ((ppm->w_re < ppm->w_re_min) || (ppm->w_re > ppm->w_re_max)
-        || (ppm->T_reh < ppm->T_re_min)) {
+  /* These tests live here and not in input.c: a failure of primordial_init is a
+     recoverable computation error for samplers, a failure of input_init is not. */
+  class_test(ppm->T_reh <= 0., ppm->error_message,
+             "T_reh must be positive, got %e GeV",ppm->T_reh);
+  class_test((ppm->g_re <= 0.) || (ppm->g_sre <= 0.), ppm->error_message,
+             "g_re and g_sre must be positive, got g_re=%e g_sre=%e",ppm->g_re,ppm->g_sre);
+  class_test(1.+ppm->w_re <= 0., ppm->error_message,
+             "w_re must satisfy 1+w_re>0, got %e",ppm->w_re);
+  class_test((ppm->reheating_bounds == _TRUE_) &&
+             ((ppm->w_re < ppm->w_re_min) || (ppm->w_re > ppm->w_re_max) || (ppm->T_reh < ppm->T_re_min)),
+             ppm->error_message,
+             "w_re=%g (allowed [%g, %g]) or T_reh=%g GeV (allowed >= %g GeV) outside the physical range; "
+             "set reheating_bounds=no or adjust reheating_w_re_min, reheating_w_re_max, reheating_T_re_min",
+             ppm->w_re,ppm->w_re_min,ppm->w_re_max,ppm->T_reh,ppm->T_re_min);
+  class_test((H_k <= 0.) || (rho_end <= 0.), ppm->error_message,
+             "need H_k>0 and rho_end>0, got H_k=%e rho_end=%e",H_k,rho_end);
 
-      class_test(ppm->reheating_bounds == _TRUE_, ppm->error_message,
-                 "reheating parameters outside the physically allowed range: "
-                 "w_re=%g (allowed [%g, %g]), T_reh=%g GeV (allowed >= %g GeV, BBN). "
-                 "Relax with reheating_bounds=no, or adjust reheating_w_re_min / "
-                 "reheating_w_re_max / reheating_T_re_min.",
-                 ppm->w_re, ppm->w_re_min, ppm->w_re_max, ppm->T_reh, ppm->T_re_min);
+  T_reh   = ppm->T_reh/M_Pl_GeV;
+  T0      = T0_K*K_B_GeV_per_K/M_Pl_GeV;
+  k_pivot = (ppm->k_pivot/Mpc_m)*hbarc_GeV_m/M_Pl_GeV;
+  rho_re  = (_PI_*_PI_/30.)*ppm->g_re*pow(T_reh,4);
 
-      if (ppm->primordial_verbose > 0)
-        printf("WARNING: reheating parameters outside the allowed range "
-               "(w_re=%g not in [%g, %g], or T_reh=%g GeV < %g GeV).\n",
-               ppm->w_re, ppm->w_re_min, ppm->w_re_max, ppm->T_reh, ppm->T_re_min);
-    }
+  N_re = log(rho_end*pow(8.*_PI_,2)/rho_re)/(3.*(1.+ppm->w_re));
 
-    class_test(H_k <= 0.0, ppm->error_message,
-               "H at pivot crossing must be positive, got H_k=%e", H_k);
-    class_test(rho_end <= 0.0, ppm->error_message,
-               "energy density at the end of inflation must be positive, got rho_end=%e",
-               rho_end);
+  *N_k = log(H_k*sqrt(8.*_PI_)/k_pivot) + log(43./(11.*ppm->g_sre))/3. + log(T0/T_reh) - N_re;
 
-    T_reh_planck   = ppm->T_reh / M_Pl_GeV;
-    T0_planck      = T0_K * K_B_GeV_per_K / M_Pl_GeV;
-    k_pivot_planck = (ppm->k_pivot / Mpc_m) * hbarc_GeV_m / M_Pl_GeV;
+  ppm->N_re_reheating = N_re;
 
-    /* CLASS units (m_Pl = 1) -> reduced Planck units */
-    H_k_red     = H_k * sqrt(8.0*_PI_);
-    rho_end_red = rho_end * pow(8.0*_PI_, 2);
-
-    rho_re_red  = (_PI_*_PI_/30.0) * ppm->g_re * pow(T_reh_planck, 4);
-
-    N_expansion   = log(H_k_red / k_pivot_planck);              /* ln(a_0 H_k / k_pivot) */
-    N_entropy     = (1.0/3.0) * log(43.0/(11.0*ppm->g_sre));    /* entropy conservation  */
-    N_temperature = log(T0_planck / T_reh_planck);
-    N_re          = log(rho_end_red / rho_re_red) / (3.0*(1.0 + ppm->w_re));
-
-    *N_k = N_expansion + N_entropy + N_temperature - N_re;
-
-    ppm->N_re_reheating = N_re;
-
-    if (ppm->primordial_verbose > 2) {
-        printf(" (reheating N_k: expansion=%.10f, entropy=%.10f, temperature=%.10f,"
-               " N_re=%.10f, total=%.10f)\n",
-               N_expansion, N_entropy, N_temperature, N_re, *N_k);
-        printf("   H_k/Mpl=%e, rho_end/Mpl^4=%e, rho_re/Mpl^4=%e\n",
-               H_k_red, rho_end_red, rho_re_red);
-        printf("   units: T_reh/Mpl=%e, k_pivot/Mpl=%e, T0/Mpl=%e, g_re=%g, g_sre=%g\n",
-               T_reh_planck, k_pivot_planck, T0_planck, ppm->g_re, ppm->g_sre);
-    }
-
-    return _SUCCESS_;
+  return _SUCCESS_;
 }
 
 /**
- * Largest reheating temperature allowed, reached when reheating is instantaneous
- * (N_re = 0, i.e. rho_re = rho_end). Eq.(37) of the note.
+ * Residual N_actual - N_k of the reheating condition for a trial pivot value phi.
  *
- * @param ppm     Input: pointer to primordial structure
- * @param H_k     Input: Hubble rate at pivot crossing, CLASS units (unused; kept
- *                       to mirror primordial_inflation_Nk_from_reheating)
- * @param rho_end Input: energy density at the end of inflation, CLASS units
- * @param T_max   Output: maximum reheating temperature in GeV
- * @return the error status
- */
-int primordial_inflation_T_max(
-    struct primordial *ppm,
-    double H_k,
-    double rho_end,
-    double *T_max)
-{
-    const double M_Pl_GeV = 2.435e18;
-    double rho_end_red;
-
-    class_test(rho_end <= 0.0, ppm->error_message,
-               "rho_end must be positive, got %e", rho_end);
-    class_test(ppm->g_re <= 0.0, ppm->error_message,
-               "g_re must be positive, got %e", ppm->g_re);
-
-    rho_end_red = rho_end * pow(8.0*_PI_, 2);
-
-    /* rho_re = rho_end  =>  T_max = [30 rho_end/(pi^2 g_re)]^(1/4) */
-    *T_max = pow(30.0*rho_end_red/(_PI_*_PI_*ppm->g_re), 0.25) * M_Pl_GeV;
-
-    return _SUCCESS_;
-}
-
-/**
- * Residual of the reheating condition at a trial pivot field value.
- *
- * From phi on the slow-roll attractor, integrate the background forward to
- * ddot(a)=0. One such integration yields N_actual = ln(a_end/a_phi), H at phi,
- * and rho_end = 3 H_end^2/(8 pi), with no slow-roll input. The pivot is where
- * N_actual - N_target vanishes.
- *
- * Also stores phi_end_inflation, H_end_inflation, rho_end_inflation and
- * H_pivot_reheating in ppm, which therefore describe the solution once the
- * search has converged.
+ * From phi on the slow-roll attractor, the background is integrated forward to
+ * ddot(a)=0. This gives N_actual = ln(a_end/a_phi), H at phi and rho_end = 3 H_end^2/(8 pi),
+ * from which N_k follows. The pivot is the zero of the residual. The last call also
+ * leaves in ppm the quantities describing the solution: phi_end_inflation (field value
+ * at ddot(a)=0), N_star_reheating (= N_k), N_re_reheating and T_max_reheating, the
+ * temperature of instantaneous reheating (N_re=0, rho_re=rho_end), which is the
+ * largest allowed T_reh.
  *
  * @param ppm      Input/output: pointer to primordial structure
  * @param ppr      Input: pointer to precision structure
  * @param y        Input: running vector of background variables, already allocated
  * @param dy       Input: running vector of background derivatives, already allocated
  * @param phi      Input: trial field value at pivot crossing
- * @param N_actual Output: e-folds from phi to the end of inflation
- * @param N_target Output: e-folds required by the reheating history
- * @param residual Output: N_actual - N_target
+ * @param residual Output: N_actual - N_k
  * @return the error status
  */
 int primordial_inflation_reheating_residual(
@@ -1140,12 +1055,10 @@ int primordial_inflation_reheating_residual(
                                             double * y,
                                             double * dy,
                                             double phi,
-                                            double * N_actual,
-                                            double * N_target,
                                             double * residual
                                             ) {
 
-  double H_phi, dphidt_phi, H_end, rho_end;
+  double H_phi, dphidt_phi, H_end, rho_end, N_k;
 
   class_call(primordial_inflation_find_attractor(ppm,
                                                  ppr,
@@ -1174,21 +1087,161 @@ int primordial_inflation_reheating_residual(
              ppm->error_message,
              ppm->error_message);
 
-  /* proper time, so dy[a] = da/dt = a H */
-  *N_actual = log(y[ppm->index_in_a]);
-  H_end     = dy[ppm->index_in_a]/y[ppm->index_in_a];
-  rho_end   = 3.*H_end*H_end/(8.*_PI_);
+  /* proper time: dy[a] = da/dt = a H */
+  H_end   = dy[ppm->index_in_a]/y[ppm->index_in_a];
+  rho_end = 3.*H_end*H_end/(8.*_PI_);
 
-  ppm->phi_end_inflation = y[ppm->index_in_phi];
-  ppm->H_end_inflation   = H_end;
-  ppm->rho_end_inflation = rho_end;
-  ppm->H_pivot_reheating = H_phi;
-
-  class_call(primordial_inflation_Nk_from_reheating(ppm,H_phi,rho_end,N_target),
+  class_call(primordial_inflation_Nk_from_reheating(ppm,H_phi,rho_end,&N_k),
              ppm->error_message,
              ppm->error_message);
 
-  *residual = *N_actual - *N_target;
+  ppm->phi_end_inflation = y[ppm->index_in_phi];
+  ppm->N_star_reheating  = N_k;
+  ppm->T_max_reheating   = pow(30.*rho_end*pow(8.*_PI_,2)/(_PI_*_PI_*ppm->g_re),0.25)*_REHEATING_M_PL_GEV_;
+
+  *residual = log(y[ppm->index_in_a]) - N_k;
+
+  return _SUCCESS_;
+}
+
+/**
+ * Pivot search when use_reheating = yes: finds phi_pivot such that the number of
+ * e-folds left until the end of inflation equals the one required by the reheating
+ * history (see primordial_inflation_reheating_residual).
+ *
+ * The root is bracketed between phi_small_epsilon (few e-folds before the end, where
+ * the residual is negative) and a value about 55 e-folds earlier, moved back in steps
+ * of 5 e-folds until the residual changes sign. Each residual costs one background
+ * integration, so the root is found by false position, with a bisection step every
+ * fourth iteration to keep the bracket shrinking.
+ *
+ * @param ppm                          Input/output: pointer to primordial structure
+ * @param ppr                          Input: pointer to precision structure
+ * @param y                            Input: running vector of background variables, already allocated
+ * @param dy                           Input: running vector of background derivatives, already allocated
+ * @param phi_small_epsilon            Input: field value where epsilon = primordial_inflation_small_epsilon
+ * @param a_ratio_after_small_epsilon  Input: a_end/a at phi_small_epsilon
+ * @return the error status
+ */
+int primordial_inflation_find_phi_pivot_reheating(
+                                                  struct primordial * ppm,
+                                                  struct precision * ppr,
+                                                  double * y,
+                                                  double * dy,
+                                                  double phi_small_epsilon,
+                                                  double a_ratio_after_small_epsilon
+                                                  ) {
+
+  double phi_a, phi_b, phi_mid=0., res_a, res_b, res_mid=0.;
+  int iter, n_back;
+
+  /* The background integrator advances ln(a) in steps of ~primordial_inflation_bg_stepsize,
+     so the residual is quantised at that level and cannot be pushed below it. */
+  double tol = MAX(1.e-8,0.2*ppr->primordial_inflation_bg_stepsize);
+
+  /** - right bracket */
+  phi_b = phi_small_epsilon;
+  class_call(primordial_inflation_reheating_residual(ppm,ppr,y,dy,phi_b,&res_b),
+             ppm->error_message,
+             ppm->error_message);
+
+  /** - left bracket: go back by ~55 e-folds, then in steps of 5 until the residual changes sign */
+  y[ppm->index_in_a]   = 1.;
+  y[ppm->index_in_phi] = phi_small_epsilon;
+  class_call(primordial_inflation_evolve_background(ppm,
+                                                    ppr,
+                                                    y,
+                                                    dy,
+                                                    _a_,
+                                                    1./exp(55.+ppr->primordial_inflation_extra_efolds)*a_ratio_after_small_epsilon,
+                                                    _TRUE_,
+                                                    backward,
+                                                    conformal),
+             ppm->error_message,
+             ppm->error_message);
+  phi_a = y[ppm->index_in_phi];
+
+  for (n_back=0; n_back < 25; n_back++) {
+
+    class_call(primordial_inflation_reheating_residual(ppm,ppr,y,dy,phi_a,&res_a),
+               ppm->error_message,
+               ppm->error_message);
+
+    if (res_a*res_b < 0.) break;
+
+    y[ppm->index_in_a]   = 1.;
+    y[ppm->index_in_phi] = phi_a;
+    class_call(primordial_inflation_evolve_background(ppm,
+                                                      ppr,
+                                                      y,
+                                                      dy,
+                                                      _a_,
+                                                      1./exp(5.),
+                                                      _TRUE_,
+                                                      backward,
+                                                      conformal),
+               ppm->error_message,
+               ppm->error_message);
+    phi_a = y[ppm->index_in_phi];
+  }
+
+  class_test(res_a*res_b >= 0.,
+             ppm->error_message,
+             "could not bracket the reheating condition: residual(phi=%e)=%e, residual(phi=%e)=%e "
+             "(w_re=%g, T_reh=%g GeV, Vparam0=%g, Vparam1=%g)",
+             phi_a,res_a,phi_b,res_b,ppm->w_re,ppm->T_reh,ppm->V0,ppm->V1);
+
+  /** - root finding */
+  for (iter=0; iter < 60; iter++) {
+
+    phi_mid = phi_a - res_a*(phi_b-phi_a)/(res_b-res_a);
+
+    if ((phi_mid <= MIN(phi_a,phi_b)) || (phi_mid >= MAX(phi_a,phi_b)) || (iter%4 == 3))
+      phi_mid = 0.5*(phi_a+phi_b);
+
+    class_call(primordial_inflation_reheating_residual(ppm,ppr,y,dy,phi_mid,&res_mid),
+               ppm->error_message,
+               ppm->error_message);
+
+    if (ppm->primordial_verbose > 2)
+      printf("    reheating pivot, iteration %d: phi=%e, residual=%.3e\n",iter,phi_mid,res_mid);
+
+    /* converged, or bracket collapsed (the remaining residual is integrator noise) */
+    if ((fabs(res_mid) < tol) || (fabs(phi_b-phi_a) < 1.e-10*MAX(1.,fabs(phi_mid)))) break;
+
+    if (res_mid*res_a < 0.) {
+      phi_b = phi_mid;
+      res_b = res_mid;
+    }
+    else {
+      phi_a = phi_mid;
+      res_a = res_mid;
+    }
+  }
+
+  /* the tolerance is kept above the integrator noise floor, so that healthy points are not rejected */
+  class_test(fabs(res_mid) > MAX(10.*tol,2.*ppr->primordial_inflation_bg_stepsize),
+             ppm->error_message,
+             "reheating pivot search did not converge: phi_pivot=%e, residual=%.3e",
+             phi_mid,res_mid);
+
+  ppm->phi_pivot = phi_mid;
+
+  class_test((ppm->reheating_bounds == _TRUE_) && (ppm->T_reh > ppm->T_max_reheating),
+             ppm->error_message,
+             "T_reh=%e GeV exceeds T_max=%e GeV (instantaneous reheating), i.e. N_re=%e<0; "
+             "set reheating_bounds=no to allow it",
+             ppm->T_reh,ppm->T_max_reheating,ppm->N_re_reheating);
+
+  /* alpha_s and beta_s are finite differences of ln P(k) and amplify the mode integration noise */
+  if ((ppm->primordial_verbose > 0) && (ppr->primordial_inflation_tol_curvature > 1.e-4))
+    printf("WARNING: primordial_inflation_tol_curvature=%g is too loose for alpha_s and beta_s "
+           "when scanning parameters; 1e-5 is recommended (n_s and r are unaffected)\n",
+           ppr->primordial_inflation_tol_curvature);
+
+  if (ppm->primordial_verbose > 0)
+    printf(" -> reheating: phi_pivot=%e, N_k=%.6f, N_re=%.6f, T_reh=%.4e GeV, T_max=%.4e GeV\n",
+           ppm->phi_pivot,ppm->N_star_reheating,ppm->N_re_reheating,ppm->T_reh,ppm->T_max_reheating);
 
   return _SUCCESS_;
 }
@@ -1269,11 +1322,14 @@ int primordial_inflation_potential(
 
     /* code here other shapes */
 
-  case alphastaro:
+case alphastaro:
 
-    /* Alpha-Starobinsky potential. */
+    // Alpha-Starobinsky potential: V(phi) = V0 * (1 - exp(-sqrt(2/(3α)) * phi/M_Pl))^2
+    // where ppm->V0 = V0, ppm->V1 = alpha
+
+    // Alpha-Starobinsky potential with phi -> -phi convention
     kk = sqrt(2./(3.*ppm->V1))*sqrt(8.*_PI_);
-    e = exp(kk*phi);
+    e = exp(kk*phi);  // Positive sign for CLASS convention
     de = kk*e;
     dde = kk*kk*e;
 
@@ -2764,16 +2820,6 @@ int primordial_inflation_find_phi_pivot(
   double Omega_g0;
   double Omega_r0;
 
-  /* NEW: Variables for reheating feedback */
-  double phi_reheating_left, phi_reheating_right;
-  int reheating_iter = 0, reheating_max_iter = 60;
-  /* primordial_inflation_evolve_background advances ln(a) in steps of
-     ~primordial_inflation_bg_stepsize (default 0.005) and stops just before
-     overshooting ddot(a)=0, so N_actual is quantised at that level; asking for a
-     tighter residual only burns iterations on noise. Reduce bg_stepsize to go
-     finer. A residual of 1e-3 e-folds is |dn_s| ~ 1e-6. */
-  double reheating_tolerance = MAX(1.e-8,0.2*ppr->primordial_inflation_bg_stepsize);
-
   /** - check whether in vicinity of phi_end, inflation is still ongoing */
 
   class_call(primordial_inflation_get_epsilon(ppm,ppm->phi_end-ppr->primordial_inflation_end_dphi,&epsilon),
@@ -2848,317 +2894,210 @@ int primordial_inflation_find_phi_pivot(
     aH_ratio_after_small_epsilon = dy[ppm->index_in_a]/y[ppm->index_in_a]/H_small_epsilon;
     a_ratio_after_small_epsilon = y[ppm->index_in_a];
 
-    // Store phi_stop from this evolution
-    phi_stop = y[ppm->index_in_phi];
-    
-    if (ppm->primordial_verbose > 1)
-      printf(" (inflation stops in phi_stop = %e)\n",phi_stop);
-
-    /* ================================================================
-     * NEW: Handle reheating feedback case
-     * ================================================================ */
     if (ppm->use_reheating == _TRUE_) {
-
-      double N_actual_l=0., N_target_l=0., res_l=0.;
-      double N_actual_r=0., N_target_r=0., res_r=0.;
-      double N_actual_m=0., N_target_m=0., res_m=0.;
-      double phi_a, phi_b;
-      int n_expand;
-
-      if (ppm->primordial_verbose > 1)
-        printf(" (using reheating feedback to determine phi_pivot)\n");
-
-      /** - --> right bracket: near the end of inflation, where N_actual is small
-          but the reheating condition still asks for many e-folds, so the residual
-          is negative. Take phi_small_epsilon (epsilon=0.1) instead of phi_stop,
-          where the attractor search is ill-conditioned. */
-
-      phi_reheating_right = phi_small_epsilon;
-
-      class_call(primordial_inflation_reheating_residual(ppm,ppr,y,dy,phi_reheating_right,
-                                                         &N_actual_r,&N_target_r,&res_r),
+      class_call(primordial_inflation_find_phi_pivot_reheating(ppm,ppr,y,dy,phi_small_epsilon,a_ratio_after_small_epsilon),
                  ppm->error_message,
                  ppm->error_message);
+      return _SUCCESS_;
+    }
 
-      /** - --> left bracket: back up ~55 e-folds, then keep going until the
-          residual changes sign. */
+    switch (ppm->phi_pivot_method) {
 
-      y[ppm->index_in_a]   = 1.;
-      y[ppm->index_in_phi] = phi_small_epsilon;
+    case ln_aH_ratio_auto:
+
+      /* get the target value of ln_aH_ratio */
+
+      rho_end = 2./8./_PI_*pow(dy[ppm->index_in_a]/y[ppm->index_in_a],2);
+      rho_end = 8*_PI_/3.*rho_end/(_G_*_h_P_/pow(_c_,3))*pow(_Mpc_over_m_,2);
+      h = 0.7;
+      H0 = h * 1.e5 / _c_;
+      rho_c0 = pow(H0,2);
+
+      sigma_B = 2. * pow(_PI_,5) * pow(_k_B_,4) / 15. / pow(_h_P_,3) / pow(_c_,2);
+      Omega_g0 = (4.*sigma_B/_c_*pow(2.726,4.)) / (3.*_c_*_c_*1.e10*h*h/_Mpc_over_m_/_Mpc_over_m_/8./_PI_/_G_);
+      Omega_r0 = 3.044*7./8.*pow(4./11.,4./3.)*Omega_g0;
+
+      target = log(H0/0.05*pow(Omega_r0,0.5)*pow(2./100.,1./12.)*pow(rho_end/rho_c0,0.25));
+
+      //fprintf(stderr,"auto: log(aH_end/aH_*)=%e\n",target);
+      break;
+
+    case ln_aH_ratio:
+
+      target = ppm->phi_pivot_target;
+      //fprintf(stderr,"fixed: log(aH_end/aH_*)=%e\n",target);
+      break;
+
+    case N_star:
+
+      target = ppm->phi_pivot_target;
+      ppm->N_star_reheating = target; /* also exported as the derived parameter N_star */
+      //fprintf(stderr,"fixed: log(a_end/a_*)=%e\n",target);
+      break;
+    }
+
+    /** - --> by starting from phi_small_epsilon and integrating an approximate
+        solution backward in time, try to estimate roughly a value close
+        to phi_pivot but a bit smaller. This is done by trying to reach
+        an amount of inflation equal to the requested one, minus the
+        amount after phi_small_epsilon, and plus
+        primordial_inflation_extra_efolds efolds (default: two). Note
+        that it is not aggressive to require two extra e-folds of
+        inflation before the pivot, since the calculation of the spectrum
+        in the observable range will require even more. */
+
+    y[ppm->index_in_a]=1.;
+    y[ppm->index_in_phi]= phi_small_epsilon;
+
+    switch (ppm->phi_pivot_method) {
+
+    case ln_aH_ratio_auto:
+    case ln_aH_ratio:
+
+      class_call(primordial_inflation_evolve_background(ppm,
+                                                        ppr,
+                                                        y,
+                                                        dy,
+                                                        _aH_,
+                                                        H_small_epsilon/exp(target+ppr->primordial_inflation_extra_efolds)*aH_ratio_after_small_epsilon,
+                                                        _TRUE_,
+                                                        backward,
+                                                        conformal),
+                 ppm->error_message,
+                 ppm->error_message);
+      break;
+
+    case N_star:
 
       class_call(primordial_inflation_evolve_background(ppm,
                                                         ppr,
                                                         y,
                                                         dy,
                                                         _a_,
-                                                        1./exp(55.+ppr->primordial_inflation_extra_efolds)*a_ratio_after_small_epsilon,
+                                                        1./exp(target+ppr->primordial_inflation_extra_efolds)*a_ratio_after_small_epsilon,
                                                         _TRUE_,
                                                         backward,
                                                         conformal),
                  ppm->error_message,
                  ppm->error_message);
-
-      phi_reheating_left = y[ppm->index_in_phi];
-
-      for (n_expand=0; n_expand < 25; n_expand++) {
-
-        class_call(primordial_inflation_reheating_residual(ppm,ppr,y,dy,phi_reheating_left,
-                                                           &N_actual_l,&N_target_l,&res_l),
-                   ppm->error_message,
-                   ppm->error_message);
-
-        if (res_l*res_r < 0.) break;
-
-        /* still not bracketed: another 5 e-folds back */
-        y[ppm->index_in_a]   = 1.;
-        y[ppm->index_in_phi] = phi_reheating_left;
-
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _a_,
-                                                          1./exp(5.),
-                                                          _TRUE_,
-                                                          backward,
-                                                          conformal),
-                   ppm->error_message,
-                   ppm->error_message);
-
-        phi_reheating_left = y[ppm->index_in_phi];
-      }
-
-      class_test(res_l*res_r >= 0.,
-                 ppm->error_message,
-                 "could not bracket the reheating condition: residual(phi=%e)=%e and "
-                 "residual(phi=%e)=%e have the same sign. "
-                 "Parameters: w_re=%g, T_reh=%g GeV, g_re=%g, g_sre=%g, "
-                 "Vparam0=%g, Vparam1=%g.",
-                 phi_reheating_left,res_l,phi_reheating_right,res_r,
-                 ppm->w_re,ppm->T_reh,ppm->g_re,ppm->g_sre,ppm->V0,ppm->V1);
-
-      if (ppm->primordial_verbose > 1)
-        printf(" (bracket: phi_left=%e [N_act=%.3f N_tgt=%.3f], phi_right=%e [N_act=%.3f N_tgt=%.3f])\n",
-               phi_reheating_left,N_actual_l,N_target_l,
-               phi_reheating_right,N_actual_r,N_target_r);
-
-      /** - --> root finding. Each residual costs a full background integration,
-          so use false position with a bisection fallback every fourth step:
-          ~10 evaluations instead of ~50, and the bracket is still guaranteed. */
-
-      phi_a = phi_reheating_left;
-      phi_b = phi_reheating_right;
-
-      for (reheating_iter = 0; reheating_iter < reheating_max_iter; reheating_iter++) {
-
-        phi_mid = phi_a - res_l*(phi_b - phi_a)/(res_r - res_l);
-
-        if ((phi_mid <= MIN(phi_a,phi_b)) || (phi_mid >= MAX(phi_a,phi_b)) ||
-            (reheating_iter%4 == 3))
-          phi_mid = 0.5*(phi_a + phi_b);
-
-        class_call(primordial_inflation_reheating_residual(ppm,ppr,y,dy,phi_mid,
-                                                           &N_actual_m,&N_target_m,&res_m),
-                   ppm->error_message,
-                   ppm->error_message);
-
-        if (ppm->primordial_verbose > 2)
-          printf("    iter %d: phi=%e, N_actual=%.8f, N_target=%.8f, residual=%.3e\n",
-                 reheating_iter,phi_mid,N_actual_m,N_target_m,res_m);
-
-        if (fabs(res_m) < reheating_tolerance) break;
-        /* the bracket has collapsed: phi_pivot is determined to ~10 digits and
-           the remaining residual is integrator noise, not a real offset */
-        if (fabs(phi_b - phi_a) < 1.e-10*MAX(1.,fabs(phi_mid))) break;
-
-        if (res_m*res_l < 0.) {
-          phi_b = phi_mid;
-          res_r = res_m;
-        }
-        else {
-          phi_a = phi_mid;
-          res_l = res_m;
-        }
-      }
-
-      /* Keep this well above both the tolerance and the quantisation of N_actual
-         (~primordial_inflation_bg_stepsize): the residual cannot go below the
-         integrator noise floor, and rejecting healthy points would punch random
-         holes in parameter space. 2*bg_stepsize = 1e-2 e-folds is |dn_s| ~ 1e-5. */
-      class_test(fabs(res_m) > MAX(10.*reheating_tolerance,
-                                   2.*ppr->primordial_inflation_bg_stepsize),
-                 ppm->error_message,
-                 "reheating pivot-finding did not converge: phi_pivot=%e, "
-                 "N_actual=%.6f, N_target=%.6f, residual=%.3e",
-                 phi_mid,N_actual_m,N_target_m,res_m);
-
-      ppm->phi_pivot        = phi_mid;
-      ppm->N_star_reheating = N_target_m;
-
-      /* eq.(37): instantaneous reheating (N_re=0) sets the highest T_re allowed. */
-      class_call(primordial_inflation_T_max(ppm,
-                                            ppm->H_pivot_reheating,
-                                            ppm->rho_end_inflation,
-                                            &(ppm->T_max_reheating)),
-                 ppm->error_message,
-                 ppm->error_message);
-
-      if (ppm->primordial_verbose > 0) {
-        printf(" -> reheating: phi_pivot=%e, N_k=%.8f, N_re=%.8f\n",
-               ppm->phi_pivot,ppm->N_star_reheating,ppm->N_re_reheating);
-        printf("    phi_end(ddot a=0)=%e, rho_end=%e, H_pivot=%e\n",
-               ppm->phi_end_inflation,ppm->rho_end_inflation,ppm->H_pivot_reheating);
-        printf("    T_reh=%.6e GeV, T_max=%.6e GeV, %d iterations, residual=%.2e\n",
-               ppm->T_reh,ppm->T_max_reheating,reheating_iter+1,res_m);
-      }
-
-      /* T_re > T_max means N_re < 0, i.e. the universe contracting during reheating */
-      if (ppm->T_reh > ppm->T_max_reheating) {
-
-        class_test(ppm->reheating_bounds == _TRUE_, ppm->error_message,
-                   "T_reh = %e GeV exceeds T_max = %e GeV (instantaneous reheating, "
-                   "eq. 37), i.e. N_re = %e < 0. This point is not physical. "
-                   "Relax with reheating_bounds=no.",
-                   ppm->T_reh,ppm->T_max_reheating,ppm->N_re_reheating);
-
-        if (ppm->primordial_verbose > 0)
-          printf("WARNING: T_reh = %e GeV exceeds T_max = %e GeV, i.e. N_re = %e < 0. "
-                 "This point is not physical.\n",
-                 ppm->T_reh,ppm->T_max_reheating,ppm->N_re_reheating);
-      }
-
-      /* alpha_s and beta_s are 2nd and 3rd finite differences of ln P(k), so they
-         amplify the noise of the mode integration by ~1/dlnk^2 and ~1/dlnk^3. At
-         the default tol_curvature=1e-3 that noise is as large as alpha_s itself. */
-      if ((ppm->primordial_verbose > 0) &&
-          (ppr->primordial_inflation_tol_curvature > 1.e-4))
-        printf("WARNING: primordial_inflation_tol_curvature = %g is too loose for "
-               "alpha_s / beta_s (they will show spurious jumps of order their own "
-               "size when scanning parameters). Set it to 1e-5; n_s and r are "
-               "unaffected and the cost is negligible.\n",
-               ppr->primordial_inflation_tol_curvature);
-
-      /** - --> find the attractor at the final phi_pivot for the calling function */
-
-      class_call(primordial_inflation_find_attractor(ppm,
-                                                     ppr,
-                                                     ppm->phi_pivot,
-                                                     ppr->primordial_inflation_attractor_precision_pivot,
-                                                     y,
-                                                     dy,
-                                                     &H_try,
-                                                     &dphidt_try),
-                 ppm->error_message,
-                 ppm->error_message);
-
+      break;
     }
-    /* ================================================================
-     * END NEW: Reheating feedback
-     * ================================================================ */
 
-    else {
-      
-      // ORIGINAL CLASS BEHAVIOR
-      
-      switch (ppm->phi_pivot_method) {
+    /* we now have a value phi_try believed to be close to and slightly smaller than phi_pivot */
 
-      case ln_aH_ratio_auto:
+    phi_try = y[ppm->index_in_phi];
 
-        /* get the target value of ln_aH_ratio */
+    /** - --> find attractor in phi_try */
 
-        rho_end = 2./8./_PI_*pow(dy[ppm->index_in_a]/y[ppm->index_in_a],2);
-        rho_end = 8*_PI_/3.*rho_end/(_G_*_h_P_/pow(_c_,3))*pow(_Mpc_over_m_,2);
-        h = 0.7;
-        H0 = h * 1.e5 / _c_;
-        rho_c0 = pow(H0,2);
+    class_call(primordial_inflation_find_attractor(ppm,
+                                                   ppr,
+                                                   phi_try,
+                                                   ppr->primordial_inflation_attractor_precision_initial,
+                                                   y,
+                                                   dy,
+                                                   &H_try,
+                                                   &dphidt_try),
+               ppm->error_message,
+               ppm->error_message);
 
-        sigma_B = 2. * pow(_PI_,5) * pow(_k_B_,4) / 15. / pow(_h_P_,3) / pow(_c_,2);
-        Omega_g0 = (4.*sigma_B/_c_*pow(2.726,4.)) / (3.*_c_*_c_*1.e10*h*h/_Mpc_over_m_/_Mpc_over_m_/8./_PI_/_G_);
-        Omega_r0 = 3.044*7./8.*pow(4./11.,4./3.)*Omega_g0;
+    /** - --> check the total amount of inflation between phi_try and the end of inflation */
 
-        target = log(H0/0.05*pow(Omega_r0,0.5)*pow(2./100.,1./12.)*pow(rho_end/rho_c0,0.25));
+    y[ppm->index_in_a]=1.;
+    y[ppm->index_in_phi]= phi_try;
+    y[ppm->index_in_dphi]= dphidt_try;
 
-        break;
+    class_call(primordial_inflation_evolve_background(ppm,
+                                                      ppr,
+                                                      y,
+                                                      dy,
+                                                      _end_inflation_,
+                                                      0.,
+                                                      _FALSE_,
+                                                      forward,
+                                                      proper),
+               ppm->error_message,
+               ppm->error_message);
 
-      case ln_aH_ratio:
+    switch (ppm->phi_pivot_method) {
 
-        target = ppm->phi_pivot_target;
-        break;
+    case ln_aH_ratio_auto:
+    case ln_aH_ratio:
 
-      case N_star:
+      // aH_ratio (we have used here proper time, so aH = dy[a])
+      ratio_try = dy[ppm->index_in_a]/H_try;
+      break;
 
-        target = ppm->phi_pivot_target;
-        /* export it too, so that the derived parameter 'N_star' is meaningful in
-           both branches and the reheating <-> N_star round-trip test can compare
-           like with like */
-        ppm->N_star_reheating = target;
-        break;
-      }
+    case N_star:
 
-      /** - --> by starting from phi_small_epsilon and integrating an approximate
-          solution backward in time, try to estimate roughly a value close
-          to phi_pivot but a bit smaller... */
+      // a_ratio
+      ratio_try = y[ppm->index_in_a];
+      break;
+    }
 
-      y[ppm->index_in_a]=1.;
-      y[ppm->index_in_phi]= phi_small_epsilon;
+    class_test(log(ratio_try) < target,
+               ppm->error_message,
+               "phi_try not small enough, log(aH_stop/aH_try) or log(a_stop/a_try) (depending on what you asked) is equal to %e instead of requested %e; must write here a loop to deal automatically with this situation (by decreasing phi_try iteratively), or must increase precision parameter primordial_inflation_extra_efolds",
+               log(ratio_try),
+               target);
 
-      switch (ppm->phi_pivot_method) {
+    phi_stop = y[1];
 
-      case ln_aH_ratio_auto:
-      case ln_aH_ratio:
+    if (ppm->primordial_verbose > 1)
+      printf(" (inflation stops in phi_stop = %e)\n",phi_stop);
 
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _aH_,
-                                                          H_small_epsilon/exp(target+ppr->primordial_inflation_extra_efolds)*aH_ratio_after_small_epsilon,
-                                                          _TRUE_,
-                                                          backward,
-                                                          conformal),
-                   ppm->error_message,
-                   ppm->error_message);
-        break;
+    /** - --> go back to phi_try, and now find phi_pivot such that the amount
+        of inflation between phi_pivot and the end of inflation is
+        exactly the one requested. */
+    y[ppm->index_in_a]=1.;
+    y[ppm->index_in_phi]= phi_try;
+    y[ppm->index_in_dphi]= dphidt_try;
 
-      case N_star:
+    switch (ppm->phi_pivot_method) {
 
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _a_,
-                                                          1./exp(target+ppr->primordial_inflation_extra_efolds)*a_ratio_after_small_epsilon,
-                                                          _TRUE_,
-                                                          backward,
-                                                          conformal),
-                   ppm->error_message,
-                   ppm->error_message);
-        break;
-      }
+    case ln_aH_ratio_auto:
+    case ln_aH_ratio:
 
-      /* we now have a value phi_try believed to be close to and slightly smaller than phi_pivot */
-
-      phi_try = y[ppm->index_in_phi];
-
-      /** - --> find attractor in phi_try */
-
-      class_call(primordial_inflation_find_attractor(ppm,
-                                                     ppr,
-                                                     phi_try,
-                                                     ppr->primordial_inflation_attractor_precision_initial,
-                                                     y,
-                                                     dy,
-                                                     &H_try,
-                                                     &dphidt_try),
+      class_call(primordial_inflation_evolve_background(ppm,
+                                                        ppr,
+                                                        y,
+                                                        dy,
+                                                        _aH_,
+                                                        H_try*ratio_try/exp(target),
+                                                        _FALSE_,
+                                                        forward,
+                                                        proper),
                  ppm->error_message,
                  ppm->error_message);
+      break;
 
-      /** - --> check the total amount of inflation between phi_try and the end of inflation */
+    case N_star:
 
-      y[ppm->index_in_a]=1.;
-      y[ppm->index_in_phi]= phi_try;
-      y[ppm->index_in_dphi]= dphidt_try;
+      class_call(primordial_inflation_evolve_background(ppm,
+                                                        ppr,
+                                                        y,
+                                                        dy,
+                                                        _a_,
+                                                        ratio_try/exp(target),
+                                                        _FALSE_,
+                                                        forward,
+                                                        proper),
+                 ppm->error_message,
+                 ppm->error_message);
+      break;
+    }
 
+    ppm->phi_pivot = y[1];
+
+    if (ppm->primordial_verbose > 1) {
+
+      printf(" (reached phi_pivot=%e)\n",ppm->phi_pivot);
+
+      /* - --> In verbose mode, check that phi_pivot is correct. Done by
+         restarting from phi_pivot and going again till the end of
+         inflation. */
+
+      aH_pivot = dy[0];
+      a_pivot = y[0];
       class_call(primordial_inflation_evolve_background(ppm,
                                                         ppr,
                                                         y,
@@ -3170,104 +3109,18 @@ int primordial_inflation_find_phi_pivot(
                                                         proper),
                  ppm->error_message,
                  ppm->error_message);
+      printf(" (from phi_pivot till the end, ln(aH_2/aH_1) = %e, ln(a_2/a_1) = %e)\n",log(dy[0]/aH_pivot),log(y[0]/a_pivot));
+    }
 
-      switch (ppm->phi_pivot_method) {
-
-      case ln_aH_ratio_auto:
-      case ln_aH_ratio:
-
-        // aH_ratio (we have used here proper time, so aH = dy[a])
-        ratio_try = dy[ppm->index_in_a]/H_try;
-        break;
-
-      case N_star:
-
-        // a_ratio
-        ratio_try = y[ppm->index_in_a];
-        break;
-      }
-
-      class_test(log(ratio_try) < target,
-                 ppm->error_message,
-                 "phi_try not small enough...");
-
-      phi_stop = y[1];
-
-      if (ppm->primordial_verbose > 1)
-        printf(" (inflation stops in phi_stop = %e)\n",phi_stop);
-
-      /** - --> go back to phi_try, and now find phi_pivot such that the amount
-          of inflation between phi_pivot and the end of inflation is
-          exactly the one requested. */
-      y[ppm->index_in_a]=1.;
-      y[ppm->index_in_phi]= phi_try;
-      y[ppm->index_in_dphi]= dphidt_try;
-
-      switch (ppm->phi_pivot_method) {
-
-      case ln_aH_ratio_auto:
-      case ln_aH_ratio:
-
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _aH_,
-                                                          H_try*ratio_try/exp(target),
-                                                          _FALSE_,
-                                                          forward,
-                                                          proper),
-                   ppm->error_message,
-                   ppm->error_message);
-        break;
-
-      case N_star:
-
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _a_,
-                                                          ratio_try/exp(target),
-                                                          _FALSE_,
-                                                          forward,
-                                                          proper),
-                   ppm->error_message,
-                   ppm->error_message);
-        break;
-      }
-
-      ppm->phi_pivot = y[1];
-
-      if (ppm->primordial_verbose > 1) {
-
-        printf(" (reached phi_pivot=%e)\n",ppm->phi_pivot);
-
-        /* - --> In verbose mode, check that phi_pivot is correct. Done by
-           restarting from phi_pivot and going again till the end of
-           inflation. */
-
-        aH_pivot = dy[0];
-        a_pivot = y[0];
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _end_inflation_,
-                                                          0.,
-                                                          _FALSE_,
-                                                          forward,
-                                                          proper),
-                   ppm->error_message,
-                   ppm->error_message);
-        printf(" (from phi_pivot till the end, ln(aH_2/aH_1) = %e, ln(a_2/a_1) = %e)\n",log(dy[0]/aH_pivot),log(y[0]/a_pivot));
-      }
-
-    } // END of else (original CLASS behavior)
 
   }
   /** - case in which epsilon<1: */
   else {
+
+    class_test(ppm->use_reheating == _TRUE_,
+               ppm->error_message,
+               "use_reheating requires inflation to end near phi_end (epsilon>1 there), so that rho_end is defined by ddot(a)=0; phi_end=%e",
+               ppm->phi_end);
 
     /** - --> find inflationary attractor in phi_small_epsilon (should exist since epsilon<1 there) */
     class_call(primordial_inflation_find_attractor(ppm,
@@ -3281,85 +3134,168 @@ int primordial_inflation_find_phi_pivot(
                ppm->error_message,
                ppm->error_message);
 
-    /* ================================================================
-     * NEW: Handle reheating feedback case for epsilon<1
-     * ================================================================ */
-    if (ppm->use_reheating == _TRUE_) {
+    /** - --> by starting from phi_end and integrating an approximate
+        solution backward in time, try to estimate roughly a value close
+        to phi_pivot but a bit smaller. This is done by trying to reach
+        an amount of inflation equal to the requested one, minus the
+        amount after phi_small_epsilon, and plus
+        primordial_inflation_extra_efolds efolds (default: two). Note
+        that it is not aggressive to require two extra e-folds of
+        inflation before the pivot, since the calculation of the spectrum
+        in the observable range will require even more. */
 
-      /* rho_end = (3/2) V_end only holds at ddot(a)=0. With epsilon<1 near phi_end
-         inflation never ends inside the integration range, so there is no rho_end
-         to speak of. Better to fail than to fall back on ppm->phi_end, which is
-         just a bracketing value. */
-      class_stop(ppm->error_message,
-                 "use_reheating requires inflation to actually end near phi_end "
-                 "(epsilon>1 there), so that rho_end is defined by ddot(a)=0. "
-                 "Found epsilon<1 at phi_end=%e. Move phi_end closer to the minimum "
-                 "of the potential.",
-                 ppm->phi_end);
+    y[ppm->index_in_a]=1.;
+    y[ppm->index_in_phi]= ppm->phi_end;
 
-    }
-    /* ================================================================
-     * END NEW: Reheating feedback for epsilon<1
-     * ================================================================ */
+    switch (ppm->phi_pivot_method) {
 
-    else {
-      
-      // ORIGINAL CLASS BEHAVIOR for epsilon<1
-      
-      y[ppm->index_in_a]=1.;
-      y[ppm->index_in_phi]= ppm->phi_end;
+    case ln_aH_ratio_auto:
+    case ln_aH_ratio:
 
-      switch (ppm->phi_pivot_method) {
-
-      case ln_aH_ratio_auto:
-      case ln_aH_ratio:
-
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _aH_,
-                                                          H_small_epsilon/exp(target+ppr->primordial_inflation_extra_efolds)*aH_ratio_after_small_epsilon,
-                                                          _TRUE_,
-                                                          backward,
-                                                          conformal),
-                   ppm->error_message,
-                   ppm->error_message);
-        break;
-
-      case N_star:
-
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _a_,
-                                                          1./exp(target+ppr->primordial_inflation_extra_efolds)*a_ratio_after_small_epsilon,
-                                                          _TRUE_,
-                                                          backward,
-                                                          conformal),
-                   ppm->error_message,
-                   ppm->error_message);
-        break;
-      }
-
-      phi_try = y[ppm->index_in_phi];
-
-      class_call(primordial_inflation_find_attractor(ppm,
-                                                     ppr,
-                                                     phi_try,
-                                                     ppr->primordial_inflation_attractor_precision_initial,
-                                                     y,
-                                                     dy,
-                                                     &H_try,
-                                                     &dphidt_try),
+      class_call(primordial_inflation_evolve_background(ppm,
+                                                        ppr,
+                                                        y,
+                                                        dy,
+                                                        _aH_,
+                                                        H_small_epsilon/exp(target+ppr->primordial_inflation_extra_efolds)*aH_ratio_after_small_epsilon,
+                                                        _TRUE_,
+                                                        backward,
+                                                        conformal),
                  ppm->error_message,
                  ppm->error_message);
+      break;
 
-      y[ppm->index_in_a]=1.;
-      y[ppm->index_in_phi]= phi_try;
-      y[ppm->index_in_dphi]= dphidt_try;
+    case N_star:
 
+      class_call(primordial_inflation_evolve_background(ppm,
+                                                        ppr,
+                                                        y,
+                                                        dy,
+                                                        _a_,
+                                                        1./exp(target+ppr->primordial_inflation_extra_efolds)*a_ratio_after_small_epsilon,
+                                                        _TRUE_,
+                                                        backward,
+                                                        conformal),
+                 ppm->error_message,
+                 ppm->error_message);
+      break;
+    }
+
+    /** - --> we now have a value phi_try believed to be close to and slightly smaller than phi_pivot */
+
+    phi_try = y[ppm->index_in_phi];
+
+    /** - --> find attractor in phi_try */
+
+    class_call(primordial_inflation_find_attractor(ppm,
+                                                   ppr,
+                                                   phi_try,
+                                                   ppr->primordial_inflation_attractor_precision_initial,
+                                                   y,
+                                                   dy,
+                                                   &H_try,
+                                                   &dphidt_try),
+               ppm->error_message,
+               ppm->error_message);
+
+    /** - --> check the total amount of inflation between phi_try and the end of inflation */
+
+    y[ppm->index_in_a]=1.;
+    y[ppm->index_in_phi]= phi_try;
+    y[ppm->index_in_dphi]= dphidt_try;
+
+    class_call(primordial_inflation_evolve_background(ppm,
+                                                      ppr,
+                                                      y,
+                                                      dy,
+                                                      _phi_,
+                                                      ppm->phi_end,
+                                                      _FALSE_,
+                                                      forward,
+                                                      proper),
+               ppm->error_message,
+               ppm->error_message);
+
+    switch (ppm->phi_pivot_method) {
+
+    case ln_aH_ratio_auto:
+    case ln_aH_ratio:
+
+      // aH_ratio (we have used here proper time, so aH = dy[a])
+      ratio_try = dy[ppm->index_in_a]/H_try;
+      break;
+
+    case N_star:
+
+      // a_ratio
+      ratio_try = y[ppm->index_in_a];
+      break;
+    }
+
+    class_test(log(ratio_try) < target,
+               ppm->error_message,
+               "phi_try not small enough, log(aH_stop/aH_try) or log(a_stop/a_try) (depending on what you asked) is equal to %e instead of requested %e; must write here a loop to deal automatically with this situation (by decreasing phi_try iteratively), or must increase precision parameter primordial_inflation_extra_efolds",
+               log(ratio_try),
+               target);
+
+    phi_stop = y[1];
+
+    if (ppm->primordial_verbose > 1)
+      printf(" (inflation stops in phi_stop = %e)\n",phi_stop);
+
+    /** - --> go back to phi_try, and now find phi_pivot such that the amount
+        of inflation between phi_pivot and the end of inflation is
+        exactly the one requested. */
+    y[ppm->index_in_a]=1.;
+    y[ppm->index_in_phi]= phi_try;
+    y[ppm->index_in_dphi]= dphidt_try;
+
+    switch (ppm->phi_pivot_method) {
+
+    case ln_aH_ratio_auto:
+    case ln_aH_ratio:
+
+      class_call(primordial_inflation_evolve_background(ppm,
+                                                        ppr,
+                                                        y,
+                                                        dy,
+                                                        _aH_,
+                                                        H_try*ratio_try/exp(target),
+                                                        _FALSE_,
+                                                        forward,
+                                                        proper),
+                 ppm->error_message,
+                 ppm->error_message);
+      break;
+
+    case N_star:
+
+      class_call(primordial_inflation_evolve_background(ppm,
+                                                        ppr,
+                                                        y,
+                                                        dy,
+                                                        _a_,
+                                                        ratio_try/exp(target),
+                                                        _FALSE_,
+                                                        forward,
+                                                        proper),
+                 ppm->error_message,
+                 ppm->error_message);
+      break;
+    }
+
+    ppm->phi_pivot = y[1];
+
+    if (ppm->primordial_verbose > 1) {
+
+      printf(" (reached phi_pivot=%e)\n",ppm->phi_pivot);
+
+      /** - --> In verbose mode, check that phi_pivot is correct. Done by
+          restarting from phi_pivot and going again till the end of
+          inflation. */
+
+      aH_pivot = dy[0];
+      a_pivot = y[0];
       class_call(primordial_inflation_evolve_background(ppm,
                                                         ppr,
                                                         y,
@@ -3371,91 +3307,8 @@ int primordial_inflation_find_phi_pivot(
                                                         proper),
                  ppm->error_message,
                  ppm->error_message);
-
-      switch (ppm->phi_pivot_method) {
-
-      case ln_aH_ratio_auto:
-      case ln_aH_ratio:
-
-        ratio_try = dy[ppm->index_in_a]/H_try;
-        break;
-
-      case N_star:
-
-        ratio_try = y[ppm->index_in_a];
-        break;
-      }
-
-      class_test(log(ratio_try) < target,
-                 ppm->error_message,
-                 "phi_try not small enough...");
-
-      phi_stop = y[1];
-
-      if (ppm->primordial_verbose > 1)
-        printf(" (inflation stops in phi_stop = %e)\n",phi_stop);
-
-      y[ppm->index_in_a]=1.;
-      y[ppm->index_in_phi]= phi_try;
-      y[ppm->index_in_dphi]= dphidt_try;
-
-      switch (ppm->phi_pivot_method) {
-
-      case ln_aH_ratio_auto:
-      case ln_aH_ratio:
-
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _aH_,
-                                                          H_try*ratio_try/exp(target),
-                                                          _FALSE_,
-                                                          forward,
-                                                          proper),
-                   ppm->error_message,
-                   ppm->error_message);
-        break;
-
-      case N_star:
-
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _a_,
-                                                          ratio_try/exp(target),
-                                                          _FALSE_,
-                                                          forward,
-                                                          proper),
-                   ppm->error_message,
-                   ppm->error_message);
-        break;
-      }
-
-      ppm->phi_pivot = y[1];
-
-      if (ppm->primordial_verbose > 1) {
-
-        printf(" (reached phi_pivot=%e)\n",ppm->phi_pivot);
-
-        aH_pivot = dy[0];
-        a_pivot = y[0];
-        class_call(primordial_inflation_evolve_background(ppm,
-                                                          ppr,
-                                                          y,
-                                                          dy,
-                                                          _phi_,
-                                                          ppm->phi_end,
-                                                          _FALSE_,
-                                                          forward,
-                                                          proper),
-                   ppm->error_message,
-                   ppm->error_message);
-        printf(" (from phi_pivot till the end, ln(aH_2/aH_1) = %e, ln(a_2/a_1) = %e)\n",log(dy[0]/aH_pivot),log(y[0]/a_pivot));
-      }
-
-    } // END of else (original CLASS behavior for epsilon<1)
+      printf(" (from phi_pivot till the end, ln(aH_2/aH_1) = %e, ln(a_2/a_1) = %e)\n",log(dy[0]/aH_pivot),log(y[0]/a_pivot));
+    }
 
   }
 
